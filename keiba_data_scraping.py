@@ -1,11 +1,23 @@
 #ライブラリのインポート
 from urllib.request import urlopen
+from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 import re
 from tqdm import tqdm
 import time
+
+import datetime
+import time
+import re
+from selenium.webdriver.common.by import By
+
+from modules import UrlPaths
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
 class Results:
     @staticmethod
@@ -22,13 +34,20 @@ class Results:
             全レース結果データをまとめてDataFrame型にしたもの
         """
         #race_idをkeyにしてDataFrame型を格納
+        scrapeing_results = []
         race_results = {}
+        race_urls = []
+        # URLのリストを作る
         for race_id in tqdm(race_id_list):
-            # time.sleep(1)
+            url = "https://db.netkeiba.com/race/" + race_id
+            race_urls.append(url)
+        # 並列でスクレイピング
+        with ThreadPoolExecutor(10) as executor:
+            scrapeing_results = list(executor.map(requests.get, race_urls))
+            
+        for race_value in tqdm(scrapeing_results):
             try:
-                url = "https://db.netkeiba.com/race/" + race_id
-                # スクレイピング
-                html = requests.get(url)
+                html = race_value
                 html.encoding = "EUC-JP"
                 # メインとなるテーブルデータを取得
                 df = pd.read_html(html.text)[0]
@@ -107,7 +126,6 @@ class HorseResults:
         horse_results_df : pandas.DataFrame
             全馬の過去成績データをまとめてDataFrame型にしたもの
         """
-
         #horse_idをkeyにしてDataFrame型を格納
         horse_results = {}
         for horse_id in tqdm(horse_id_list):
@@ -130,7 +148,6 @@ class HorseResults:
 
         #pd.DataFrame型にして一つのデータにまとめる        
         horse_results_df = pd.concat([horse_results[key] for key in horse_results])
-
         return horse_results_df
 
 #血統データを処理するクラス
@@ -245,30 +262,117 @@ def update_data(old, new):
     return pd.concat([filtered_old, new])
 
 
-race_id_list = []
-# 何年度のレース結果を取得するか指定
-race_years = "2019"
-for place in range(1, 11, 1):
-    for kai in range(1, 7, 1):
-        for day in range(1, 13, 1):
-            for r in range(1, 13, 1):
-                race_id = race_years + str(place).zfill(2) + str(kai).zfill(2) + str(day).zfill(2) + str(r).zfill(2)
-                race_id_list.append(race_id)
+def scrape_kaisai_date(from_: str, to_: str):
+    """
+    yyyy-mmの形式でfrom_とto_を指定すると、間のレース開催日一覧が返ってくる関数。
+    to_の月は含まないので注意。
+    """
+    print('getting race date from {} to {}'.format(from_, to_))
+    # 間の年月一覧を作成
+    date_range = pd.date_range(start=from_, end=to_, freq="M")
+    # 開催日一覧を入れるリスト
+    kaisai_date_list = []
+    for year, month in tqdm(zip(date_range.year, date_range.month), total=len(date_range)):
+        # 取得したdate_rangeから、スクレイピング対象urlを作成する。
+        # urlは例えば、https://race.netkeiba.com/top/calendar.html?year=2022&month=7 のような構造になっている。
+        query = [
+            'year=' + str(year),
+            'month=' + str(month),
+        ]
+        url = UrlPaths.CALENDAR_URL + '?' + '&'.join(query)
+        html = urlopen(url).read()
+        time.sleep(1)
+        soup = BeautifulSoup(html, "html.parser")
+        a_list = soup.find('table', class_='Calendar_Table').find_all('a')
+        for a in a_list:
+            kaisai_date_list.append(re.findall('(?<=kaisai_date=)\d+', a['href'])[0])
+    return kaisai_date_list
+
+def scrape_race_id_list(kaisai_date_list: list, waiting_time=0):
+    """
+    開催日をyyyymmddの文字列形式でリストで入れると、レースid一覧が返ってくる関数。
+    ChromeDriverは要素を取得し終わらないうちに先に進んでしまうことがあるので、
+    要素が見つかるまで(ロードされるまで)の待機時間をwaiting_timeで指定。
+    """
+    race_id_list = []
+    driver = prepare_chrome_driver()
+    # 取得し終わらないうちに先に進んでしまうのを防ぐため、暗黙的な待機（デフォルト0秒）
+    driver.implicitly_wait(waiting_time)
+    max_attempt = 2
+    print('getting race_id_list')
+    for kaisai_date in tqdm(kaisai_date_list):
+        try:
+            query = [
+                'kaisai_date=' + str(kaisai_date)
+            ]
+            url = UrlPaths.RACE_LIST_URL + '?' + '&'.join(query)
+            print('scraping: {}'.format(url))
+            driver.get(url)
+
+            for i in range(1, max_attempt):
+                try:
+                    a_list = driver.find_element(By.CLASS_NAME, 'RaceList_Box').find_elements(By.TAG_NAME, 'a')
+                    break
+                except Exception as e:
+                    # 取得できない場合は、リトライを実施
+                    print(f'error:{e} retry:{i}/{max_attempt} waiting more {waiting_time} seconds')
+
+            for a in a_list:
+                race_id = re.findall('(?<=shutuba.html\?race_id=)\d+|(?<=result.html\?race_id=)\d+',
+                    a.get_attribute('href'))
+                if len(race_id) > 0:
+                    race_id_list.append(race_id[0])
+        except Exception as e:
+            print(e)
+            break
+
+    driver.close()
+    driver.quit()
+    return race_id_list
+
+
+def prepare_chrome_driver():
+    """
+    Chromeのバージョンアップは頻繁に発生し、Webdriverとのバージョン不一致が多発するため、
+    ChromeDriverManagerを使用し、自動的にバージョンを一致させる。
+    """
+    # ヘッドレスモード（ブラウザが立ち上がらない）
+    options = Options()
+    options.add_argument('--headless')
+    options.add_argument("--no-sandbox")
+    # Selenium3の場合
+    #driver = webdriver.Chrome(ChromeDriverManager().install(), options=options)
+    # Selenium4の場合
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    # 画面サイズをなるべく小さくし、余計な画像などを読み込まないようにする
+    driver.set_window_size(50, 50)
+    return driver
+
+
+# to_の月は含まないので注意。
+date = scrape_kaisai_date(
+    from_="2019-01-01", 
+    to_="2023-07-01"
+    )
+
+# 開催日からレースIDの取得
+race_id_list = scrape_race_id_list(date)
 
 #レース結果データの取得
 results = Results.scrape(race_id_list)
-results.to_pickle('results.pickle')
+
+results.to_pickle('data/raw/results.pickle')
 
 #馬の過去成績データの取得
 horse_id_list = results['horse_id'].unique()
 horse_results = HorseResults.scrape(horse_id_list)
-horse_results.to_pickle('horse_results.pickle')
+horse_results.to_pickle('data/raw/horse_results.pickle')
 
 #血統データの取得
 horse_blodd_result = Peds.scrape(horse_id_list)
-horse_blodd_result.to_pickle('horse_blodd_result.pickle')
+horse_blodd_result.to_pickle('data/raw/horse_blodd_result.pickle')
 
 
 # 払い戻し表データの取得
 return_result = Return.scrape(race_id_list)
-return_result.to_pickle('return_result.pickle')
+return_result.to_pickle('data/raw/return_result.pickle')
