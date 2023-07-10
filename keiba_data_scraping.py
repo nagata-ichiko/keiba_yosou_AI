@@ -10,7 +10,6 @@ import time
 class Results:
     @staticmethod
     def scrape(race_id_list):
-        print("go")
         """
         レース結果データをスクレイピングする関数
         Parameters:
@@ -25,7 +24,7 @@ class Results:
         #race_idをkeyにしてDataFrame型を格納
         race_results = {}
         for race_id in tqdm(race_id_list):
-            time.sleep(1)
+            # time.sleep(1)
             try:
                 url = "https://db.netkeiba.com/race/" + race_id
                 # スクレイピング
@@ -112,7 +111,7 @@ class HorseResults:
         #horse_idをkeyにしてDataFrame型を格納
         horse_results = {}
         for horse_id in tqdm(horse_id_list):
-            time.sleep(1)
+            # time.sleep(1)
             try:
                 url = 'https://db.netkeiba.com/horse/' + horse_id
                 df = pd.read_html(url)[3]
@@ -154,7 +153,7 @@ class Peds:
 
         peds_dict = {}
         for horse_id in tqdm(horse_id_list):
-            time.sleep(1)
+            # time.sleep(1)
             try:
                 url = "https://db.netkeiba.com/horse/ped/" + horse_id
                 df = pd.read_html(url)[0]
@@ -201,7 +200,7 @@ class Return:
 
         return_tables = {}
         for race_id in tqdm(race_id_list):
-            time.sleep(1)
+            # time.sleep(1)
             try:
                 url = "https://db.netkeiba.com/race/" + race_id
 
