@@ -34,20 +34,11 @@ class Results:
             全レース結果データをまとめてDataFrame型にしたもの
         """
         #race_idをkeyにしてDataFrame型を格納
-        scrapeing_results = []
-        race_results = {}
-        race_urls = []
-        # URLのリストを作る
+        race_results = {}            
         for race_id in tqdm(race_id_list):
-            url = "https://db.netkeiba.com/race/" + race_id
-            race_urls.append(url)
-        # 並列でスクレイピング
-        with ThreadPoolExecutor(10) as executor:
-            scrapeing_results = list(executor.map(requests.get, race_urls))
-            
-        for race_value in tqdm(scrapeing_results):
             try:
-                html = race_value
+                url = "https://db.netkeiba.com/race/" + race_id
+                html = requests.get(url)
                 html.encoding = "EUC-JP"
                 # メインとなるテーブルデータを取得
                 df = pd.read_html(html.text)[0]
@@ -288,7 +279,7 @@ def scrape_kaisai_date(from_: str, to_: str):
             kaisai_date_list.append(re.findall('(?<=kaisai_date=)\d+', a['href'])[0])
     return kaisai_date_list
 
-def scrape_race_id_list(kaisai_date_list: list, waiting_time=0):
+def scrape_race_id_list(kaisai_date_list: list, waiting_time=10):
     """
     開催日をyyyymmddの文字列形式でリストで入れると、レースid一覧が返ってくる関数。
     ChromeDriverは要素を取得し終わらないうちに先に進んでしまうことがあるので、
@@ -351,8 +342,8 @@ def prepare_chrome_driver():
 
 # to_の月は含まないので注意。
 date = scrape_kaisai_date(
-    from_="2019-01-01", 
-    to_="2023-07-01"
+    from_="2018-01-01", 
+    to_="2023-08-01"
     )
 
 # 開催日からレースIDの取得
