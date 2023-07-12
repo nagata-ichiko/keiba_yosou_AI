@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 import re
 from tqdm import tqdm
 import time
-
+import os
 import datetime
 import time
 import re
@@ -149,6 +149,7 @@ class HorseResults:
             horse_id = url.split('/')[-1]  # get horse_id from url
             try:
                 df = future.result()  
+                df.index = [horse_id] * len(df)
                 horse_results[horse_id] = df
             except Exception as e:
                 print(e)
@@ -275,7 +276,6 @@ def update_data(old, new):
     filtered_old = old[~old.index.isin(new.index)]
     return pd.concat([filtered_old, new])
 
-
 def scrape_kaisai_date(from_: str, to_: str):
     """
     yyyy-mmの形式でfrom_とto_を指定すると、間のレース開催日一覧が返ってくる関数。
@@ -344,7 +344,6 @@ def scrape_race_id_list(kaisai_date_list: list, waiting_time=10):
     driver.quit()
     return race_id_list
 
-
 def prepare_chrome_driver():
     """
     Chromeのバージョンアップは頻繁に発生し、Webdriverとのバージョン不一致が多発するため、
@@ -362,6 +361,32 @@ def prepare_chrome_driver():
     driver.set_window_size(50, 50)
     return driver
 
+# 過去に取得したデータを取得の対象外にする
+def update_id_list(file_path, new_id_list):
+    if os.path.exists(file_path):
+        old_data = pd.read_pickle(file_path)
+        old_id_list = old_data.index.unique()
+        return list(set(new_id_list) - set(old_id_list))
+    else:
+        return new_id_list
+
+# 過去に取得したデータは保存の対象外にする
+def scrape_and_save(scrape_func, file_path, param):
+    updated_param = update_id_list(file_path, param)
+
+    if not updated_param:
+        print(f"No new data to scrape for {file_path}")
+        return
+
+    new_data = scrape_func(updated_param)
+
+    if os.path.exists(file_path):
+        old_data = pd.read_pickle(file_path)
+        data = pd.concat([old_data, new_data])
+    else:
+        data = new_data
+
+    data.to_pickle(file_path)
 
 # to_の月は含まないので注意。
 date = scrape_kaisai_date(
@@ -372,21 +397,16 @@ date = scrape_kaisai_date(
 # 開催日からレースIDの取得
 race_id_list = scrape_race_id_list(date)
 
-#レース結果データの取得
-results = Results.scrape(race_id_list)
+# レース結果データの取得
+scrape_and_save(Results.scrape, 'data/raw/results.pickle', race_id_list)
 
-results.to_pickle('data/raw/results.pickle')
+# 馬の過去成績データの取得
 
-#馬の過去成績データの取得
-horse_id_list = results['horse_id'].unique()
-horse_results = HorseResults.scrape(horse_id_list)
-horse_results.to_pickle('data/raw/horse_results.pickle')
+horse_id_list = pd.read_pickle('data/raw/results.pickle')['horse_id'].unique().tolist()
+scrape_and_save(HorseResults.scrape, 'data/raw/horse_results.pickle', horse_id_list)
 
-#血統データの取得
-horse_blodd_result = Peds.scrape(horse_id_list)
-horse_blodd_result.to_pickle('data/raw/horse_blodd_result.pickle')
-
+# 血統データの取得
+scrape_and_save(Peds.scrape, 'data/raw/horse_blodd_result.pickle', horse_id_list)
 
 # 払い戻し表データの取得
-return_result = Return.scrape(race_id_list)
-return_result.to_pickle('data/raw/return_result.pickle')
+scrape_and_save(Return.scrape, 'data/raw/return_result.pickle', race_id_list)

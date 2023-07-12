@@ -342,7 +342,7 @@ def prepare_chrome_driver():
 
 # to_の月は含まないので注意。
 date = scrape_kaisai_date(
-    from_="2018-01-01", 
+    from_="2022-01-01", 
     to_="2023-08-01"
     )
 
