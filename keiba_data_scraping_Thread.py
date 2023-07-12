@@ -42,7 +42,7 @@ class Results:
             url = "https://db.netkeiba.com/race/" + race_id
             race_urls.append(url)
         # 並列でスクレイピング
-        with ThreadPoolExecutor(10) as executor:
+        with ThreadPoolExecutor(4) as executor:
             scrapeing_results = list(executor.map(requests.get, race_urls))
             
         for race_id, race_value in tqdm(zip(race_id_list,scrapeing_results)):
@@ -133,6 +133,7 @@ class HorseResults:
         horse_urls = ['https://db.netkeiba.com/horse/' + id for id in horse_id_list]
         def fetch(url):
             try:
+                print('scraping-HorseResult: {}'.format(url))                
                 df = pd.read_html(url)[3]
                 #受賞歴がある馬の場合、3番目に受賞歴テーブルが来るため、4番目のデータを取得する
                 if df.columns[0]=='受賞歴':
@@ -179,6 +180,7 @@ class Peds:
       
         def fetch(url):
             try:
+                print('scraping-Peds: {}'.format(url))
                 df = pd.read_html(url)[0]
 
                 #重複を削除して1列のSeries型データに直す
@@ -230,6 +232,7 @@ class Return:
 
         def fetch(url):
             try:
+                print('scraping-Return: {}'.format(url))
                 #普通にスクレイピングすると複勝やワイドなどが区切られないで繋がってしまう。
                 #そのため、改行コードを文字列brに変換して後でsplitする
                 f = urlopen(url)
@@ -390,8 +393,8 @@ def scrape_and_save(scrape_func, file_path, param):
 
 # to_の月は含まないので注意。
 date = scrape_kaisai_date(
-    from_="2020-01-01", 
-    to_="2021-07-01"
+    from_="2019-08-01", 
+    to_="2020-01-01"
     )
 
 # 開催日からレースIDの取得
